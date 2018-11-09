@@ -1,4 +1,5 @@
 import json
+
 try:
     from urllib import urlencode
 except ImportError:
@@ -7,7 +8,15 @@ except ImportError:
 from logging import Filter
 from logging.handlers import SocketHandler
 
-import pika
+try:
+    import pika
+except ImportError:
+    pass
+try:
+    import kombu
+except ImportError:
+    pass
+
 from logstash import formatter
 
 
@@ -47,9 +56,7 @@ class AMQPLogstashHandler(SocketHandler, object):
                  password='guest', exchange='logstash', exchange_type='fanout',
                  virtual_host='/', message_type='logstash', tags=None,
                  durable=False, passive=False, version=0, extra_fields=True,
-                 fqdn=False, facility=None, exchange_routing_key=''):
-
-
+                 fqdn=False, facility=None, exchange_routing_key='', socket=None):
         # AMQP parameters
         self.host = host
         self.port = port
@@ -61,6 +68,7 @@ class AMQPLogstashHandler(SocketHandler, object):
         self.declare_exchange_passively = passive
         self.virtual_host = virtual_host
         self.routing_key = exchange_routing_key
+        self.socket = socket if socket in [KombuSocket, PikaSocket] else PikaSocket
 
         SocketHandler.__init__(self, host, port)
 
@@ -76,26 +84,51 @@ class AMQPLogstashHandler(SocketHandler, object):
         self.facility = facility
 
     def makeSocket(self, **kwargs):
-
-        return PikaSocket(self.host,
-                          self.port,
-                          self.username,
-                          self.password,
-                          self.virtual_host,
-                          self.exchange,
-                          self.routing_key,
-                          self.exchange_is_durable,
-                          self.declare_exchange_passively,
-                          self.exchange_type)
+        return self.socket(self.host,
+                           self.port,
+                           self.username,
+                           self.password,
+                           self.virtual_host,
+                           self.exchange,
+                           self.routing_key,
+                           self.exchange_is_durable,
+                           self.declare_exchange_passively,
+                           self.exchange_type)
 
     def makePickle(self, record):
         return self.formatter.format(record)
 
 
+class KombuSocket(object):
+
+    def __init__(self, host, port, username, password, virtual_host, exchange,
+                 routing_key, durable, passive, exchange_type):
+        self.connection = kombu.Connection(
+            f'amqp://{username}:{password}@{host}:{port}/{virtual_host}')
+        self.producer = self.connection.Producer(serializer='json')
+        self.routing_key = routing_key
+        self.exchange = exchange
+        if not passive:
+            exchange = kombu.Exchange(exchange, exchange_type, durable=durable)
+            self.queue = [kombu.Queue('logstash', exchange=exchange, key=routing_key)]
+        else:
+            self.queue = None
+
+    def sendall(self, data):
+        self.producer.publish(data, exchange=self.exchange, routing_key=self.routing_key,
+                              declare=self.queue)
+
+    def close(self):
+        try:
+            self.producer.cancel()
+        except Exception:
+            pass
+
+
 class PikaSocket(object):
 
     def __init__(self, host, port, username, password, virtual_host, exchange,
-                routing_key, durable, passive, exchange_type):
+                 routing_key, durable, passive, exchange_type):
 
         # create connection parameters
         credentials = pika.PlainCredentials(username, password)
@@ -116,7 +149,6 @@ class PikaSocket(object):
         self.spec = pika.spec.BasicProperties(delivery_mode=2)
         self.routing_key = routing_key
         self.exchange = exchange
-
 
     def sendall(self, data):
 
