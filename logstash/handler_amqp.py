@@ -102,9 +102,9 @@ class AMQPLogstashHandler(SocketHandler, object):
 class KombuSocket(object):
 
     def __init__(self, host, port, username, password, virtual_host, exchange,
-                 routing_key, durable, passive, exchange_type):
+                 routing_key, durable, passive, exchange_type, ssl):
         self.connection = kombu.Connection(
-            f'amqp://{username}:{password}@{host}:{port}/{virtual_host}')
+            f'amqp://{username}:{password}@{host}:{port}/{virtual_host}', ssl=ssl)
         self.producer = self.connection.Producer(serializer='json')
         self.routing_key = routing_key
         self.exchange = exchange
