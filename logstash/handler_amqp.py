@@ -1,4 +1,4 @@
-import json
+import os
 
 try:
     from urllib import urlencode
@@ -54,12 +54,13 @@ class AMQPLogstashHandler(SocketHandler, object):
 
     def __init__(self, host='localhost', port=5672, username='guest',
                  password='guest', exchange='logstash', exchange_type='fanout',
-                 virtual_host='/', message_type='logstash', tags=None,
+                 virtual_host='/', message_type='logstash', tags=None, ssl_option=None,
                  durable=False, passive=False, version=0, extra_fields=True,
                  fqdn=False, facility=None, exchange_routing_key='', socket=None):
         # AMQP parameters
         self.host = host
         self.port = port
+        self.ssl_option = ssl_option
         self.username = username
         self.password = password
         self.exchange_type = exchange_type
@@ -86,6 +87,7 @@ class AMQPLogstashHandler(SocketHandler, object):
     def makeSocket(self, **kwargs):
         return self.socket(self.host,
                            self.port,
+                           self.ssl_option,
                            self.username,
                            self.password,
                            self.virtual_host,
@@ -101,10 +103,10 @@ class AMQPLogstashHandler(SocketHandler, object):
 
 class KombuSocket(object):
 
-    def __init__(self, host, port, username, password, virtual_host, exchange,
-                 routing_key, durable, passive, exchange_type, ssl):
+    def __init__(self, host, port, ssl_option, username, password, virtual_host, exchange,
+                 routing_key, durable, passive, exchange_type):
         self.connection = kombu.Connection(
-            f'amqp://{username}:{password}@{host}:{port}/{virtual_host}', ssl=ssl)
+            f'amqp://{username}:{password}@{host}:{port}/{virtual_host}', ssl=ssl_option)
         self.producer = self.connection.Producer(serializer='json')
         self.routing_key = routing_key
         self.exchange = exchange
@@ -127,13 +129,19 @@ class KombuSocket(object):
 
 class PikaSocket(object):
 
-    def __init__(self, host, port, username, password, virtual_host, exchange,
+    def __init__(self, host, port, ssl_option, username, password, virtual_host, exchange,
                  routing_key, durable, passive, exchange_type):
+        if ssl_option:
+            ssl_option = pika.SSLOptions(keyfile=ssl_option['keyfile'],
+                                         certfile=ssl_option['certfile'],
+                                         verify_mode=ssl_option['cert_reqs'],
+                                         cafile=ssl_option['ca_certs'],
+                                         server_hostname=os.getenv('HOSTNAME', 'localhost'))
 
         # create connection parameters
         credentials = pika.PlainCredentials(username, password)
         parameters = pika.ConnectionParameters(host, port, virtual_host,
-                                               credentials)
+                                               credentials, ssl_options=ssl_option)
 
         # create connection & channel
         self.connection = pika.BlockingConnection(parameters)
