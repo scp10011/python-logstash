@@ -118,7 +118,7 @@ class KombuSocket(object):
 
     def sendall(self, data):
         self.producer.publish(data, exchange=self.exchange, routing_key=self.routing_key,
-                              declare=self.queue)
+                              declare=self.queue, content_type='application/json')
 
     def close(self):
         try:
